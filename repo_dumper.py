@@ -13,6 +13,7 @@ import sys
 import argparse
 from pathlib import Path
 import subprocess
+import fnmatch
 
 def parse_arguments():
     """Парсинг аргументов командной строки"""
@@ -37,10 +38,161 @@ def parse_arguments():
     parser.add_argument(
         'path',
         nargs='?',
-        help='Путь к репозиторию (только в быстром режиме)'
+        help='Путь к репозитории (только в быстром режиме)'
     )
     
     return parser.parse_args()
+
+def parse_gitignore(repo_path):
+    """
+    Парсинг всех файлов .gitignore в репозитории.
+    Возвращает список шаблонов для игнорирования.
+    """
+    gitignore_patterns = []
+    
+    # Ищем все файлы .gitignore в репозитории
+    for gitignore_file in repo_path.rglob('.gitignore'):
+        try:
+            with open(gitignore_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    
+                    # Пропускаем пустые строки и комментарии
+                    if not line or line.startswith('#'):
+                        continue
+                    
+                    # Получаем относительный путь от корня репозитория
+                    rel_gitignore_path = gitignore_file.parent.relative_to(repo_path)
+                    
+                    # Обрабатываем шаблон
+                    pattern = line
+                    
+                    # Если шаблон начинается с /, он считается от директории .gitignore
+                    if pattern.startswith('/'):
+                        pattern = pattern[1:]
+                    
+                    # Создаем полный относительный путь от корня репозитория
+                    if rel_gitignore_path != Path('.'):
+                        full_pattern = str(rel_gitignore_path / pattern)
+                    else:
+                        full_pattern = pattern
+                    
+                    # Нормализуем разделители путей
+                    full_pattern = full_pattern.replace('\\', '/')
+                    
+                    # Добавляем паттерн для директории (если заканчивается на /)
+                    if full_pattern.endswith('/'):
+                        # Для директорий добавляем два варианта:
+                        # 1. Сам паттерн (для проверки директорий)
+                        gitignore_patterns.append(full_pattern)
+                        # 2. Паттерн с ** для файлов внутри
+                        gitignore_patterns.append(full_pattern + '**')
+                        # 3. Паттерн без / для точного совпадения
+                        gitignore_patterns.append(full_pattern.rstrip('/'))
+                    else:
+                        gitignore_patterns.append(full_pattern)
+                    
+        except (UnicodeDecodeError, IOError):
+            # Пропускаем файлы, которые не можем прочитать
+            continue
+    
+    return gitignore_patterns
+
+def parse_gitignore(repo_path):
+    """
+    Парсинг всех файлов .gitignore в репозитории.
+    Возвращает список шаблонов для игнорирования.
+    """
+    gitignore_patterns = []
+    
+    # Ищем все файлы .gitignore в репозитории
+    for gitignore_file in repo_path.rglob('.gitignore'):
+        try:
+            with open(gitignore_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    
+                    # Пропускаем пустые строки и комментарии
+                    if not line or line.startswith('#'):
+                        continue
+                    
+                    # Получаем относительный путь от корня репозитория
+                    rel_gitignore_path = gitignore_file.parent.relative_to(repo_path)
+                    
+                    # Обрабатываем шаблон
+                    pattern = line
+                    
+                    # Если шаблон начинается с /, он считается от директории .gitignore
+                    if pattern.startswith('/'):
+                        pattern = pattern[1:]
+                    
+                    # Создаем полный относительный путь от корня репозитория
+                    if rel_gitignore_path != Path('.'):
+                        full_pattern = str(rel_gitignore_path / pattern)
+                    else:
+                        full_pattern = pattern
+                    
+                    # Нормализуем разделители путей
+                    full_pattern = full_pattern.replace('\\', '/')
+                    
+                    # Добавляем паттерн для директории (если заканчивается на /)
+                    if full_pattern.endswith('/'):
+                        # Для директорий добавляем два варианта:
+                        # 1. Сам паттерн (для проверки директорий)
+                        gitignore_patterns.append(full_pattern)
+                        # 2. Паттерн с ** для файлов внутри
+                        gitignore_patterns.append(full_pattern + '**')
+                        # 3. Паттерн без / для точного совпадения
+                        gitignore_patterns.append(full_pattern.rstrip('/'))
+                    else:
+                        gitignore_patterns.append(full_pattern)
+                    
+        except (UnicodeDecodeError, IOError):
+            # Пропускаем файлы, которые не можем прочитать
+            continue
+    
+    return gitignore_patterns
+
+def should_ignore_path(path, gitignore_patterns, repo_path):
+    """
+    Проверяет, должен ли путь быть проигнорирован на основе .gitignore шаблонов.
+    """
+    try:
+        # Получаем относительный путь от корня репозитория
+        rel_path = path.relative_to(repo_path)
+        path_str = str(rel_path).replace('\\', '/')
+        
+        # Проверяем каждый шаблон
+        for pattern in gitignore_patterns:
+            # Специальная обработка для шаблонов с **
+            if '**' in pattern:
+                # Заменяем ** на * для fnmatch
+                fnmatch_pattern = pattern.replace('**', '*')
+                # Для шаблонов с ** используем более гибкое сравнение
+                if fnmatch.fnmatch(path_str, fnmatch_pattern):
+                    return True
+                # Также проверяем частичные совпадения для директорий
+                if pattern.endswith('/**') and path_str.startswith(pattern.rstrip('**')):
+                    return True
+            elif pattern.endswith('/'):
+                # Паттерн для директории
+                if path_str == pattern.rstrip('/') or path_str.startswith(pattern):
+                    return True
+            else:
+                # Простое сопоставление с шаблоном
+                if fnmatch.fnmatch(path_str, pattern):
+                    return True
+                # Проверяем, является ли файл внутри игнорируемой директории
+                if '/' in pattern and fnmatch.fnmatch(path_str, pattern + '/**'):
+                    return True
+                # Проверяем, совпадает ли начало пути
+                if path_str.startswith(pattern + '/'):
+                    return True
+        
+        return False
+    except ValueError:
+        # Если не можем получить относительный путь
+        return False
 
 def get_repo_path_interactive():
     """Интерактивный запрос пути к репозиторию"""
@@ -56,7 +208,7 @@ def get_repo_path_interactive():
     print("  - ../относительный/путь")
     print("  - или Enter для текущей директории")
     
-    repo_path = input("\nВведите путь к локальному репозиторию (Enter для текущей директории): ").strip()
+    repo_path = input("\nВведите путь к локальному репозитории (Enter для текущей директории): ").strip()
     repo_path = repo_path.strip('\"\'')
     
     if not repo_path:
@@ -94,11 +246,11 @@ def get_repo_path_quick(cli_path=None):
         print(f"\n✓ Используется путь из аргументов: {repo_path}")
     else:
         # Запрашиваем путь у пользователя
-        repo_path = input("\nВведите путь к репозиторию (обязательно): ").strip()
+        repo_path = input("\nВведите путь к репозитории (обязательно): ").strip()
         repo_path = repo_path.strip('\"\'')
         
         if not repo_path:
-            print("❌ Ошибка: В быстром режиме путь к репозиторию обязателен!")
+            print("❌ Ошибка: В быстром режиме путь к репозитории обязателен!")
             print("Использование: python3 repo_dumper.py -q /путь/к/репозиторию")
             sys.exit(1)
         
@@ -179,7 +331,8 @@ def get_file_filter(quick_mode=False):
             'skip_node_modules': True,
             'skip_venv': True,
             'skip_hidden': False,
-            'max_file_size': None
+            'max_file_size': None,
+            'use_gitignore': True  # Новая опция: использовать .gitignore
         }
     
     # Интерактивный режим
@@ -193,13 +346,15 @@ def get_file_filter(quick_mode=False):
         'skip_node_modules': True,
         'skip_venv': True,
         'skip_hidden': False,
-        'max_file_size': None
+        'max_file_size': None,
+        'use_gitignore': True  # Новая опция: использовать .gitignore
     }
     
     print("\nРекомендуемые настройки:")
     print("1. Пропускать бинарные файлы (картинки, PDF, архивы) - ДА")
     print("2. Пропускать служебные папки (.git, node_modules, venv) - ДА")
     print("3. Пропускать скрытые файлы (.env, .config) - НЕТ")
+    print("4. Использовать правила из .gitignore - ДА")
     
     change = input("\nИзменить настройки фильтрации? (y/N): ").strip().lower()
     
@@ -210,6 +365,7 @@ def get_file_filter(quick_mode=False):
         filters['skip_node_modules'] = input("Пропускать node_modules? (Y/n): ").strip().lower() != 'n'
         filters['skip_venv'] = input("Пропускать виртуальные окружения? (Y/n): ").strip().lower() != 'n'
         filters['skip_hidden'] = input("Пропускать скрытые файлы? (y/N): ").strip().lower() == 'y'
+        filters['use_gitignore'] = input("Использовать правила из .gitignore? (Y/n): ").strip().lower() != 'n'
         
         max_size = input("Максимальный размер файла в МБ (оставьте пустым для без ограничений): ").strip()
         if max_size:
@@ -220,7 +376,7 @@ def get_file_filter(quick_mode=False):
     
     return filters
 
-def should_skip_file(file_path, filters, repo_path, output_file=None):
+def should_skip_file(file_path, filters, repo_path, gitignore_patterns, output_file=None):
     """Определить, нужно ли пропускать файл"""
     try:
         rel_path = file_path.relative_to(repo_path)
@@ -238,6 +394,11 @@ def should_skip_file(file_path, filters, repo_path, output_file=None):
     # Пропускаем по пути
     path_str = str(rel_path)
     parts = path_str.split(os.sep)
+    
+    # Проверяем правила .gitignore
+    if filters.get('use_gitignore', True) and gitignore_patterns:
+        if should_ignore_path(file_path, gitignore_patterns, repo_path):
+            return True
     
     if filters['skip_git'] and '.git' in parts:
         return True
@@ -277,13 +438,29 @@ def create_repo_dump(repo_path, output_file, filters, quick_mode=False):
         print("НАЧИНАЕМ ОБРАБОТКУ...")
         print(f"{'='*60}")
     
+    # Парсим .gitignore файлы
+    gitignore_patterns = []
+    if filters.get('use_gitignore', True):
+        if not quick_mode:
+            print("📄 Чтение правил из .gitignore...")
+        gitignore_patterns = parse_gitignore(repo_path)
+        if gitignore_patterns and not quick_mode:
+            print(f"✓ Загружено {len(gitignore_patterns)} правил из .gitignore")
+    
     total_files = 0
     processed_files = 0
     skipped_files = 0
+    skipped_by_gitignore = 0
     
     # Создаем функцию should_skip с привязкой к output_file
     def should_skip(file_path):
-        return should_skip_file(file_path, filters, repo_path, output_file)
+        nonlocal skipped_by_gitignore
+        skip = should_skip_file(file_path, filters, repo_path, gitignore_patterns, output_file)
+        if skip and filters.get('use_gitignore', True) and gitignore_patterns:
+            # Проверяем, был ли файл пропущен из-за .gitignore
+            if should_ignore_path(file_path, gitignore_patterns, repo_path):
+                skipped_by_gitignore += 1
+        return skip
     
     # Сначала посчитаем общее количество файлов
     if not quick_mode:
@@ -295,6 +472,8 @@ def create_repo_dump(repo_path, output_file, filters, quick_mode=False):
     
     if not quick_mode:
         print(f"Найдено файлов: {total_files}")
+        if gitignore_patterns:
+            print(f"Правил .gitignore загружено: {len(gitignore_patterns)}")
     
     # Создаем выходной файл
     with open(output_file, 'w', encoding='utf-8') as out_file:
@@ -302,7 +481,7 @@ def create_repo_dump(repo_path, output_file, filters, quick_mode=False):
         out_file.write(f"{'='*80}\n")
         out_file.write(f"ДАМП РЕПОЗИТОРИЯ: {repo_path.name}\n")
         if not quick_mode:
-            out_file.write(f"ФИЛЬТРЫ: пропускать бинарные={filters['skip_binary']}, .git={filters['skip_git']}\n")
+            out_file.write(f"ФИЛЬТРЫ: пропускать бинарные={filters['skip_binary']}, .git={filters['skip_git']}, использовать .gitignore={filters.get('use_gitignore', True)}\n")
         out_file.write(f"{'='*80}\n\n")
         
         # Обрабатываем файлы
@@ -342,6 +521,9 @@ def create_repo_dump(repo_path, output_file, filters, quick_mode=False):
                     # Выводим прогресс в быстром режиме
                     if quick_mode and processed_files % 50 == 0:
                         print(f"  Обработано файлов: {processed_files}")
+                    elif not quick_mode and processed_files % 10 == 0:
+                        progress = (processed_files / total_files) * 100 if total_files > 0 else 0
+                        print(f"  Прогресс: {processed_files}/{total_files} файлов ({progress:.1f}%)")
                         
                 except Exception as e:
                     out_file.write(f"[ОШИБКА ЧТЕНИЯ ФАЙЛА: {e}]\n")
@@ -354,8 +536,16 @@ def create_repo_dump(repo_path, output_file, filters, quick_mode=False):
         
         git_info = get_git_info(repo_path)
         out_file.write(git_info)
+        
+        # Добавляем информацию о фильтрации
+        if gitignore_patterns:
+            out_file.write(f"\n\n{'='*80}\n")
+            out_file.write("ПРИМЕНЕННЫЕ ПРАВИЛА .gitignore\n")
+            out_file.write(f"{'='*80}\n\n")
+            for pattern in sorted(set(gitignore_patterns)):
+                out_file.write(f"- {pattern}\n")
     
-    return processed_files, skipped_files
+    return processed_files, skipped_files, skipped_by_gitignore
 
 def get_git_info(repo_path):
     """Получить информацию о Git репозитории"""
@@ -426,6 +616,7 @@ def main():
             print("ПОДТВЕРЖДЕНИЕ:")
             print(f"Репозиторий: {repo_path.name}")
             print(f"Выходной файл: {output_file.name}")
+            print(f"Использовать .gitignore: {filters.get('use_gitignore', 'Да')}")
             print(f"{'='*60}")
             
             confirm = input("\nНачать обработку? (y/N): ").strip().lower()
@@ -434,7 +625,7 @@ def main():
                 return
         
         # Создаем дамп
-        processed, skipped = create_repo_dump(repo_path, output_file, filters, quick_mode)
+        processed, skipped, skipped_by_gitignore = create_repo_dump(repo_path, output_file, filters, quick_mode)
         
         # Выводим результат
         if output_file.exists():
@@ -455,6 +646,8 @@ def main():
         print(f"Репозиторий: {repo_path.name}")
         print(f"Обработано файлов: {processed}")
         print(f"Пропущено файлов: {skipped}")
+        if filters.get('use_gitignore', True):
+            print(f"Пропущено по .gitignore: {skipped_by_gitignore}")
         print(f"Выходной файл: {output_file.name}")
         
         if file_size_kb < 1024:
