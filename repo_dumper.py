@@ -204,7 +204,6 @@ def get_repo_path_interactive():
     
     print(f"\nТекущая директория: {current_dir}")
     print("Примеры путей:")
-    print("  - ./shadowsocs-keenetic-dvanya")
     print("  - ../относительный/путь")
     print("  - или Enter для текущей директории")
     
@@ -233,7 +232,6 @@ def get_repo_path_quick(cli_path=None):
     
     print(f"\nТекущая директория: {current_dir}")
     print("Примеры путей:")
-    print("  - ./shadowsocs-keenetic-dvanya")
     print("  - ../относительный/путь")
     print("  - /полный/путь/к/репозиторию")
     
